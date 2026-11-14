@@ -7,7 +7,7 @@ from .schemas import MessageIn
 from .security import current_user,tenant_access
 from .models import User
 from .db import engine,Base
-app=FastAPI(title="Zero-Token Voice Receptionist",version="0.3.0"); app.include_router(router)
+app=FastAPI(title="Zero-Token Voice Receptionist",version="0.3.1"); app.include_router(router)
 @app.on_event("startup")
 async def startup():
     # Development convenience only. Use Alembic migrations in production.
@@ -23,20 +23,25 @@ async def turn(body:TurnRequest,user:User=Depends(current_user)):
     return TurnResponse(reply=result["reply"],session_id=body.session_id)
 @app.websocket("/v1/stream/{tenant_id}/{session_id}")
 async def stream(ws:WebSocket,tenant_id:UUID,session_id:UUID):
+    # WebSocket query tokens are temporary; reverse proxies must redact query strings.
     token=ws.query_params.get("token")
     if not token: await ws.close(code=1008); return
-    from .security import current_user
+    from .security import create_token
     from jose import jwt,JWTError
     from .config import settings
+    from .db import SessionLocal
     try:
         claims=jwt.decode(token,settings.app_secret,algorithms=["HS256"])
         if claims.get("tenant")!=str(tenant_id): await ws.close(code=1008); return
-    except JWTError: await ws.close(code=1008); return
+        uid=claims.get("sub")
+        async with SessionLocal() as db: user=await db.get(User,uid)
+        if not user or not user.is_active or user.tenant_id!=tenant_id: await ws.close(code=1008); return
+    except (JWTError,ValueError): await ws.close(code=1008); return
     await ws.accept()
     try:
         while True:
             payload=json.loads(await ws.receive_text()); text=str(payload.get("text","")).strip()
             if not text: continue
-            result=await grounded_reply(tenant_id,session_id,MessageIn(content=text))
+            result=await grounded_reply(tenant_id,session_id,MessageIn(content=text),user)
             await ws.send_json({"type":"reply","text":result["reply"],"sources":result["sources"]})
     except WebSocketDisconnect: return
