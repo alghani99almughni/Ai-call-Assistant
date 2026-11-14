@@ -31,6 +31,10 @@ services:
       db: {condition: service_healthy}
       redis: {condition: service_started}
       ollama: {condition: service_started}
+  web:
+    build: ./frontend
+    ports: ["3000:3000"]
+    depends_on: [api]
 volumes:
   postgres_data:
   ollama_data:
