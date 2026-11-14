@@ -18,8 +18,10 @@ class User(Base):
 class TenantPhone(Base):
  __tablename__="tenant_phones"
  id:Mapped[uuid.UUID]=mapped_column(UUID(as_uuid=True),primary_key=True,default=uuid.uuid4);tenant_id:Mapped[uuid.UUID]=mapped_column(UUID(as_uuid=True),index=True,unique=True)
- phone_number:Mapped[str]=mapped_column(String(20),unique=True,index=True);provider:Mapped[str]=mapped_column(String(30),default="twilio")
- provider_number_sid:Mapped[str|None]=mapped_column(String(64),nullable=True);enabled:Mapped[bool]=mapped_column(Boolean,default=True);created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),server_default=func.now())
+ business_name:Mapped[str]=mapped_column(String(180));phone_number:Mapped[str]=mapped_column(String(20),unique=True,index=True)
+ provider:Mapped[str]=mapped_column(String(30),default="voicelink");provider_number_sid:Mapped[str|None]=mapped_column(String(100),nullable=True)
+ provider_config:Mapped[dict]=mapped_column(JSON,default=dict);enabled:Mapped[bool]=mapped_column(Boolean,default=True)
+ created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),server_default=func.now())
 class CallSession(Base):
  __tablename__="call_sessions"
  id:Mapped[uuid.UUID]=mapped_column(UUID(as_uuid=True),primary_key=True,default=uuid.uuid4);tenant_id:Mapped[uuid.UUID]=mapped_column(UUID(as_uuid=True),index=True)
