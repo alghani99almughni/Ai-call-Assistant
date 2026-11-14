@@ -3,11 +3,13 @@ from pydantic import BaseModel,Field
 from uuid import UUID
 import json
 from .routes import router,grounded_reply
+from .telephony import router as telephony_router
 from .schemas import MessageIn
 from .security import current_user,tenant_access
 from .models import User
 from .db import engine,Base
-app=FastAPI(title="Zero-Token Voice Receptionist",version="0.3.1"); app.include_router(router)
+app=FastAPI(title="Zero-Token Voice Receptionist",version="0.4.0")
+app.include_router(router); app.include_router(telephony_router)
 @app.on_event("startup")
 async def startup():
     # Development convenience only. Use Alembic migrations in production.
@@ -23,10 +25,8 @@ async def turn(body:TurnRequest,user:User=Depends(current_user)):
     return TurnResponse(reply=result["reply"],session_id=body.session_id)
 @app.websocket("/v1/stream/{tenant_id}/{session_id}")
 async def stream(ws:WebSocket,tenant_id:UUID,session_id:UUID):
-    # WebSocket query tokens are temporary; reverse proxies must redact query strings.
     token=ws.query_params.get("token")
     if not token: await ws.close(code=1008); return
-    from .security import create_token
     from jose import jwt,JWTError
     from .config import settings
     from .db import SessionLocal
