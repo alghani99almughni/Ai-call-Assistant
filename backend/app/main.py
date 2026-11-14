@@ -3,57 +3,47 @@ from pydantic import BaseModel, Field
 from uuid import UUID
 import httpx, json
 from .config import settings
+from .routes import router
+from .db import engine, Base
 
-app = FastAPI(title="Zero-Token Voice Receptionist", version="0.1.0")
+app = FastAPI(title="Zero-Token Voice Receptionist", version="0.2.0")
+app.include_router(router)
+
+@app.on_event("startup")
+async def startup():
+    # Development convenience only. Use Alembic migrations in production.
+    async with engine.begin() as conn: await conn.run_sync(Base.metadata.create_all)
 
 class TurnRequest(BaseModel):
     tenant_id: UUID
     session_id: UUID
     text: str = Field(min_length=1, max_length=8000)
     language: str = "auto"
-
 class TurnResponse(BaseModel):
     reply: str
     session_id: UUID
 
-SYSTEM_PROMPT = """You are a helpful, concise business receptionist.
-Answer only using supplied business context when factual. If unsure, say you will
-take a message and have a staff member follow up. Never invent prices, availability,
-policies, or appointments. Respond in the caller's language when possible."""
-
 @app.get("/health")
-async def health():
-    return {"status": "ok", "service": "voice-receptionist"}
+async def health(): return {"status":"ok","service":"voice-receptionist"}
 
-async def generate_reply(tenant_id: UUID, session_id: UUID, text: str) -> str:
-    # TODO: Load tenant-scoped RAG chunks and rolling transcript from Postgres/Redis.
-    messages = [{"role":"system","content":SYSTEM_PROMPT},
-                {"role":"user","content":text}]
-    try:
-        async with httpx.AsyncClient(timeout=90) as client:
-            r = await client.post(f"{settings.ollama_url}/api/chat",
-                json={"model":settings.ollama_model,"messages":messages,"stream":False})
-            r.raise_for_status()
-            return r.json()["message"]["content"].strip()
-    except httpx.HTTPError as exc:
-        raise HTTPException(status_code=503, detail=f"Local model unavailable: {exc}")
-
-@app.post("/v1/turn", response_model=TurnResponse)
-async def turn(body: TurnRequest):
-    reply = await generate_reply(body.tenant_id, body.session_id, body.text)
-    return TurnResponse(reply=reply, session_id=body.session_id)
+@app.post("/v1/turn",response_model=TurnResponse)
+async def turn(body:TurnRequest):
+    from .routes import grounded_reply
+    from .schemas import MessageIn
+    result=await grounded_reply(body.tenant_id,body.session_id,MessageIn(content=body.text))
+    return TurnResponse(reply=result["reply"],session_id=body.session_id)
 
 @app.websocket("/v1/stream/{tenant_id}/{session_id}")
-async def stream(ws: WebSocket, tenant_id: UUID, session_id: UUID):
-    # Text-turn websocket scaffold; audio/WebRTC transport is not wired yet.
+async def stream(ws:WebSocket,tenant_id:UUID,session_id:UUID):
+    # Text-only socket scaffold; WebRTC/SIP media not connected in this version.
     await ws.accept()
     try:
         while True:
-            incoming = await ws.receive_text()
-            data = json.loads(incoming)
-            text = str(data.get("text","")).strip()
+            payload=json.loads(await ws.receive_text())
+            text=str(payload.get("text","")).strip()
             if not text: continue
-            reply = await generate_reply(tenant_id, session_id, text)
-            await ws.send_json({"type":"reply","text":reply,"session_id":str(session_id)})
-    except WebSocketDisconnect:
-        return
+            from .routes import grounded_reply
+            from .schemas import MessageIn
+            result=await grounded_reply(tenant_id,session_id,MessageIn(content=text))
+            await ws.send_json({"type":"reply","text":result["reply"],"sources":result["sources"]})
+    except WebSocketDisconnect: return
