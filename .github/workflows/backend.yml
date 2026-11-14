@@ -1,0 +1,22 @@
+name: Backend checks
+on:
+  push:
+    branches: [zero-token-voice-receptionist]
+  pull_request:
+    branches: [zero-token-voice-receptionist]
+jobs:
+  security-unit:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: pip install fastapi sqlalchemy pgvector pydantic-settings python-jose[cryptography] asyncpg pytest
+      - run: python -m compileall -q app
+      - run: pytest -q
